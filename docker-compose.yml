@@ -1,0 +1,93 @@
+version: "3.8"
+
+services:
+
+  # ─── n8n Workflow Engine ───────────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: news-pipeline-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://${N8N_HOST:-localhost}:5678/
+      - GENERIC_TIMEZONE=${TIMEZONE:-America/Chicago}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/home/node/.n8n/google-credentials.json
+      - N8N_USER_FOLDER=/home/node/.n8n
+      # Expose pipeline config to workflow expressions
+      - GOOGLE_SPREADSHEET_ID=${GOOGLE_SPREADSHEET_ID}
+      - SHEET_PUBLISHED=${SHEET_PUBLISHED:-Published}
+      - SHEET_REVIEW=${SHEET_REVIEW:-For Review}
+      - SHEET_ARCHIVE=${SHEET_ARCHIVE:-Archive}
+      - SCORE_PUBLISH_MIN=${SCORE_PUBLISH_MIN:-7}
+      - SCORE_REVIEW_MIN=${SCORE_REVIEW_MIN:-4}
+      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-4-6}
+      - FEED_LIMIT=${FEED_LIMIT:-100}
+    volumes:
+      - ./n8n-data:/home/node/.n8n
+      - ./config/google-credentials.json:/home/node/.n8n/google-credentials.json:ro
+    networks:
+      - pipeline-net
+    depends_on:
+      redis:
+        condition: service_started
+      feed-manager:
+        condition: service_healthy
+
+  # ─── Feed Manager (FastAPI — multi-feed aggregator) ────────────────────────
+  feed-manager:
+    build:
+      context: ./feed-manager
+      dockerfile: Dockerfile
+    container_name: news-pipeline-feeds
+    restart: unless-stopped
+    volumes:
+      - ./config/feeds.yaml:/app/feeds.yaml:ro
+    networks:
+      - pipeline-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ─── Redis (n8n queue mode / deduplication cache) ─────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: news-pipeline-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_secret}
+    volumes:
+      - redis-data:/data
+    networks:
+      - pipeline-net
+
+  # ─── Score Logger (audit API) ─────────────────────────────────────────────
+  score-logger:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.logger
+    container_name: news-pipeline-logger
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    ports:
+      - "5001:5001"
+    networks:
+      - pipeline-net
+
+volumes:
+  redis-data:
+
+networks:
+  pipeline-net:
+    driver: bridge

@@ -1,0 +1,149 @@
+# ─────────────────────────────────────────────────────────────
+# feeds.yaml — RSS/Atom feed sources
+# Add, remove, or disable feeds without restarting the stack.
+# The feed-manager service hot-reloads this on every request.
+#
+# Fields:
+#   name:     Display name (used in Google Sheets logging)
+#   url:      RSS/Atom feed URL
+#   category: Topic tag (used in Claude scoring prompt context)
+#   enabled:  true/false — set false to pause without deleting
+# ─────────────────────────────────────────────────────────────
+
+feeds:
+
+  # ── Threat Intelligence & Research ──────────────────────────
+  - name: "Krebs on Security"
+    url: "https://krebsonsecurity.com/feed/"
+    category: "threat-intelligence"
+    enabled: true
+
+  - name: "Schneier on Security"
+    url: "https://www.schneier.com/feed/atom/"
+    category: "threat-intelligence"
+    enabled: true
+
+  - name: "The Hacker News"
+    url: "https://feeds.feedburner.com/TheHackersNews"
+    category: "threat-intelligence"
+    enabled: true
+
+  - name: "BleepingComputer"
+    url: "https://www.bleepingcomputer.com/feed/"
+    category: "threat-intelligence"
+    enabled: true
+
+  - name: "Dark Reading"
+    url: "https://www.darkreading.com/rss.xml"
+    category: "threat-intelligence"
+    enabled: true
+
+  - name: "Recorded Future Blog"
+    url: "https://www.recordedfuture.com/feed"
+    category: "threat-intelligence"
+    enabled: true
+
+  # ── Offensive Security & Red Team ───────────────────────────
+  - name: "OffSec Blog"
+    url: "https://www.offsec.com/blog/feed/"
+    category: "offensive-security"
+    enabled: true
+
+  - name: "Hakluke"
+    url: "https://hakluke.com/rss.xml"
+    category: "offensive-security"
+    enabled: true
+
+  - name: "SpecterOps Blog"
+    url: "https://posts.specterops.io/feed"
+    category: "offensive-security"
+    enabled: true
+
+  - name: "Red Teaming Experiments"
+    url: "https://www.ired.team/feed.xml"
+    category: "offensive-security"
+    enabled: true
+
+  - name: "MDSec Blog"
+    url: "https://www.mdsec.co.uk/blog/feed/"
+    category: "offensive-security"
+    enabled: true
+
+  - name: "NCC Group Research"
+    url: "https://research.nccgroup.com/feed/"
+    category: "offensive-security"
+    enabled: true
+
+  # ── Malware & Reverse Engineering ───────────────────────────
+  - name: "Malwarebytes Labs"
+    url: "https://www.malwarebytes.com/blog/feed/index.xml"
+    category: "malware-research"
+    enabled: true
+
+  - name: "Elastic Security Labs"
+    url: "https://www.elastic.co/security-labs/rss/feed.xml"
+    category: "malware-research"
+    enabled: true
+
+  - name: "Unit 42 (Palo Alto)"
+    url: "https://unit42.paloaltonetworks.com/feed/"
+    category: "malware-research"
+    enabled: true
+
+  - name: "Talos Intelligence Blog"
+    url: "https://blog.talosintelligence.com/rss/"
+    category: "malware-research"
+    enabled: true
+
+  - name: "Google Project Zero"
+    url: "https://googleprojectzero.blogspot.com/feeds/posts/default"
+    category: "malware-research"
+    enabled: true
+
+  # ── CVEs & Vulnerabilities ───────────────────────────────────
+  - name: "CISA Advisories"
+    url: "https://www.cisa.gov/cybersecurity-advisories/feed"
+    category: "vulnerability"
+    enabled: true
+
+  - name: "Rapid7 Blog"
+    url: "https://www.rapid7.com/blog/rss.xml"
+    category: "vulnerability"
+    enabled: true
+
+  - name: "Tenable Blog"
+    url: "https://www.tenable.com/blog/feed"
+    category: "vulnerability"
+    enabled: true
+
+  # ── AI / ML Security ─────────────────────────────────────────
+  - name: "Adversarial Robustness"
+    url: "https://adversarial-ml-tutorial.org/feed.xml"
+    category: "ai-security"
+    enabled: true
+
+  - name: "AI Village News"
+    url: "https://aivillage.org/feed.xml"
+    category: "ai-security"
+    enabled: false  # Enable if feed is active
+
+  - name: "Trail of Bits Blog"
+    url: "https://blog.trailofbits.com/feed/"
+    category: "ai-security"
+    enabled: true
+
+  # ── Windows Internals & Exploit Dev ─────────────────────────
+  - name: "j00ru//vx tech blog"
+    url: "https://j00ru.vexillium.org/feed/"
+    category: "exploit-dev"
+    enabled: true
+
+  - name: "Hex-Rays Blog"
+    url: "https://hex-rays.com/blog/index.xml"
+    category: "exploit-dev"
+    enabled: true
+
+  - name: "modexp (Windows Internals)"
+    url: "https://modexp.wordpress.com/feed/"
+    category: "exploit-dev"
+    enabled: true

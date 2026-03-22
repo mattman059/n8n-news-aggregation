@@ -1,0 +1,313 @@
+{
+  "name": "News Intelligence Pipeline",
+  "nodes": [
+
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 */2 * * *" }]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 400],
+      "id": "node-schedule-trigger"
+    },
+
+    {
+      "parameters": {
+        "url": "=http://feed-manager:8080/articles?limit={{ $env.FEED_LIMIT || 100 }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "Fetch All Articles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 400],
+      "id": "node-fetch-articles"
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Split feed-manager article array into individual n8n items\n// feed-manager already deduplicates within this batch by URL hash\nconst articles = Array.isArray($input.item.json) ? $input.item.json : [];\nconst now = new Date().toISOString();\n\nreturn articles.map(a => ({\n  id:          a.id,\n  title:       a.title || 'Untitled',\n  url:         a.url   || '',\n  summary:     a.summary || '',\n  pubDate:     a.published || now,\n  source:      a.source_name || 'unknown',\n  category:    a.source_category || 'general',\n  processedAt: now\n}));"
+      },
+      "name": "Split Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 400],
+      "id": "node-split-articles"
+    },
+
+    {
+      "parameters": {
+        "model": "={{ $env.CLAUDE_MODEL || 'claude-opus-4-6' }}",
+        "options": {
+          "systemMessage": "You are an expert content analyst for cybersecurity and offensive security topics. Your job is to score articles for relevance and quality.\n\nScoring criteria (1-10):\n- 8-10: Breaking CVEs, novel attack techniques, threat intel, significant tool releases, APT activity, nation-state operations\n- 5-7:  General security news, patch roundups, industry commentary with substance\n- 3-4:  Vendor marketing, vague op-eds, low-information pieces\n- 1-2:  Off-topic, clickbait, duplicate coverage\n\nYou MUST respond with ONLY a valid JSON object. No markdown, no preamble. Format:\n{\n  \"score\": <integer 1-10>,\n  \"reason\": \"<one sentence rationale>\",\n  \"tags\": [\"<tag1>\", \"<tag2>\"],\n  \"tldr\": \"<2-3 sentence summary of the article>\"\n}"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "Score this article:\n\nTitle: {{ $json.title }}\nSource: {{ $json.source }}\nCategory: {{ $json.category }}\nDate: {{ $json.pubDate }}\nSummary: {{ $json.summary }}\nURL: {{ $json.url }}"
+            }
+          ]
+        }
+      },
+      "name": "Scoring AI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [900, 400],
+      "id": "node-scoring-ai",
+      "credentials": {
+        "anthropicApi": { "id": "anthropic-creds", "name": "Anthropic API" }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's JSON scoring response and merge with article data\nconst article = $('Split Articles').item.json;\nconst rawResponse = $input.item.json.text || $input.item.json.content || '';\n\nlet scoring;\ntry {\n  const cleaned = rawResponse.replace(/```json|```/g, '').trim();\n  scoring = JSON.parse(cleaned);\n} catch(e) {\n  scoring = { score: 0, reason: 'parse error: ' + e.message, tags: [], tldr: '' };\n}\n\nreturn {\n  ...article,\n  score:  typeof scoring.score === 'number' ? scoring.score : 0,\n  reason: scoring.reason || '',\n  tags:   (scoring.tags  || []).join(', '),\n  tldr:   scoring.tldr   || ''\n};"
+      },
+      "name": "Parse Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "id": "node-parse-score"
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Route article to a tier based on configurable env var thresholds.\n// Centralising the threshold logic here avoids duplicating it across IF nodes\n// and makes it trivial to change SCORE_PUBLISH_MIN / SCORE_REVIEW_MIN in .env.\nconst score      = $json.score;\nconst publishMin = parseInt($env.SCORE_PUBLISH_MIN) || 7;\nconst reviewMin  = parseInt($env.SCORE_REVIEW_MIN)  || 4;\n\nconst tier = score >= publishMin ? 'published'\n           : score >= reviewMin  ? 'review'\n           : 'archived';\n\nreturn { ...$json, tier };"
+      },
+      "name": "Route Article",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400],
+      "id": "node-route-article"
+    },
+
+    {
+      "parameters": {
+        "url": "http://score-logger:5001/log",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "event",    "value": "={{ $json.tier }}" },
+            { "name": "title",   "value": "={{ $json.title }}" },
+            { "name": "url",     "value": "={{ $json.url }}" },
+            { "name": "score",   "value": "={{ $json.score }}" },
+            { "name": "reason",  "value": "={{ $json.reason }}" },
+            { "name": "source",  "value": "={{ $json.source }}" },
+            { "name": "category","value": "={{ $json.category }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Audit Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1340, 220],
+      "id": "node-audit-log"
+    },
+
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.tier }}",
+              "operation": "equal",
+              "value2": "published"
+            }
+          ]
+        }
+      },
+      "name": "Quality Filter (Publish?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1560, 400],
+      "id": "node-quality-filter-1"
+    },
+
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.tier }}",
+              "operation": "equal",
+              "value2": "review"
+            }
+          ]
+        }
+      },
+      "name": "Quality Filter (Review?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1560, 600],
+      "id": "node-quality-filter-2"
+    },
+
+    {
+      "parameters": {
+        "model": "={{ $env.CLAUDE_MODEL || 'claude-opus-4-6' }}",
+        "options": {
+          "systemMessage": "You are a senior cybersecurity analyst and technical writer. Write structured analysis reports for security professionals based on article summaries. Be precise, technical, and actionable. Avoid filler language.\n\nRespond ONLY with a valid JSON object:\n{\n  \"headline\": \"<rewritten punchy headline>\",\n  \"analysis\": \"<3-5 sentence technical analysis, written for offensive security practitioners>\",\n  \"so_what\": \"<1-2 sentences: why this matters practically>\",\n  \"action_items\": [\"<actionable item 1>\", \"<actionable item 2>\"]\n}"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "Write an analysis report for this article:\n\nTitle: {{ $json.title }}\nSource: {{ $json.source }} ({{ $json.category }})\nTLDR: {{ $json.tldr }}\nTags: {{ $json.tags }}\nScore: {{ $json.score }}/10\nReason: {{ $json.reason }}\nURL: {{ $json.url }}"
+            }
+          ]
+        }
+      },
+      "name": "Content AI",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [1780, 300],
+      "id": "node-content-ai",
+      "credentials": {
+        "anthropicApi": { "id": "anthropic-creds", "name": "Anthropic API" }
+      }
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Merge article metadata with generated content analysis\nconst article = $('Route Article').item.json;\nconst rawResp  = $input.item.json.text || $input.item.json.content || '';\n\nlet content;\ntry {\n  const cleaned = rawResp.replace(/```json|```/g, '').trim();\n  content = JSON.parse(cleaned);\n} catch(e) {\n  content = { headline: article.title, analysis: '', so_what: '', action_items: [] };\n}\n\nreturn {\n  title:        article.title,\n  headline:     content.headline     || article.title,\n  url:          article.url,\n  source:       article.source,\n  category:     article.category,\n  pubDate:      article.pubDate,\n  score:        article.score,\n  tags:         article.tags,\n  tldr:         article.tldr,\n  analysis:     content.analysis     || '',\n  so_what:      content.so_what      || '',\n  action_items: (content.action_items || []).join(' | '),\n  processedAt:  article.processedAt\n};"
+      },
+      "name": "Merge Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300],
+      "id": "node-merge-content"
+    },
+
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "={{ $env.GOOGLE_SPREADSHEET_ID }}", "mode": "id" },
+        "sheetName":  { "value": "={{ $env.SHEET_PUBLISHED }}", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date":         "={{ $json.pubDate }}",
+            "Score":        "={{ $json.score }}",
+            "Title":        "={{ $json.title }}",
+            "Headline":     "={{ $json.headline }}",
+            "URL":          "={{ $json.url }}",
+            "Source":       "={{ $json.source }}",
+            "Category":     "={{ $json.category }}",
+            "Tags":         "={{ $json.tags }}",
+            "TLDR":         "={{ $json.tldr }}",
+            "Analysis":     "={{ $json.analysis }}",
+            "So What":      "={{ $json.so_what }}",
+            "Action Items": "={{ $json.action_items }}",
+            "Processed At": "={{ $json.processedAt }}"
+          }
+        }
+      },
+      "name": "Log to Published Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2220, 300],
+      "id": "node-sheet-published",
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "google-sheets-creds", "name": "Google Sheets" }
+      }
+    },
+
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "={{ $env.GOOGLE_SPREADSHEET_ID }}", "mode": "id" },
+        "sheetName":  { "value": "={{ $env.SHEET_REVIEW }}", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date":     "={{ $json.pubDate }}",
+            "Score":    "={{ $json.score }}",
+            "Title":    "={{ $json.title }}",
+            "URL":      "={{ $json.url }}",
+            "Source":   "={{ $json.source }}",
+            "Category": "={{ $json.category }}",
+            "Tags":     "={{ $json.tags }}",
+            "TLDR":     "={{ $json.tldr }}",
+            "Reason":   "={{ $json.reason }}"
+          }
+        }
+      },
+      "name": "Log to Review Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1780, 600],
+      "id": "node-sheet-review",
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "google-sheets-creds", "name": "Google Sheets" }
+      }
+    },
+
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "value": "={{ $env.GOOGLE_SPREADSHEET_ID }}", "mode": "id" },
+        "sheetName":  { "value": "={{ $env.SHEET_ARCHIVE }}", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date":     "={{ $json.pubDate }}",
+            "Score":    "={{ $json.score }}",
+            "Title":    "={{ $json.title }}",
+            "URL":      "={{ $json.url }}",
+            "Source":   "={{ $json.source }}",
+            "Category": "={{ $json.category }}",
+            "Reason":   "={{ $json.reason }}"
+          }
+        }
+      },
+      "name": "Log to Archive Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1780, 760],
+      "id": "node-sheet-archive",
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "google-sheets-creds", "name": "Google Sheets" }
+      }
+    }
+
+  ],
+
+  "connections": {
+    "Schedule Trigger":          { "main": [[{ "node": "Fetch All Articles",         "type": "main", "index": 0 }]] },
+    "Fetch All Articles":        { "main": [[{ "node": "Split Articles",              "type": "main", "index": 0 }]] },
+    "Split Articles":            { "main": [[{ "node": "Scoring AI",                  "type": "main", "index": 0 }]] },
+    "Scoring AI":                { "main": [[{ "node": "Parse Score",                 "type": "main", "index": 0 }]] },
+    "Parse Score":               { "main": [[{ "node": "Route Article",               "type": "main", "index": 0 }]] },
+    "Route Article":             { "main": [[{ "node": "Audit Log",                   "type": "main", "index": 0 },
+                                             { "node": "Quality Filter (Publish?)",   "type": "main", "index": 0 }]] },
+    "Quality Filter (Publish?)": {
+      "main": [
+        [{ "node": "Content AI",               "type": "main", "index": 0 }],
+        [{ "node": "Quality Filter (Review?)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Quality Filter (Review?)": {
+      "main": [
+        [{ "node": "Log to Review Sheet",  "type": "main", "index": 0 }],
+        [{ "node": "Log to Archive Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Content AI":    { "main": [[{ "node": "Merge Content",         "type": "main", "index": 0 }]] },
+    "Merge Content": { "main": [[{ "node": "Log to Published Sheet", "type": "main", "index": 0 }]] }
+  },
+
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["news", "intelligence", "automation", "cybersecurity"]
+}
