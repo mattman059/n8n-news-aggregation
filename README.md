@@ -18,7 +18,7 @@
 
 ## Overview
 
-The News Intelligence Pipeline is a self-hosted, Docker-native automation stack that continuously monitors 31 cybersecurity RSS feeds, scores each article for relevance using Claude Opus, performs deep technical analysis on high-value content, and routes results to a structured Google Sheet — all without manual intervention.
+The News Intelligence Pipeline is a self-hosted, Docker-native automation stack that continuously monitors 31 cybersecurity RSS feeds, scores each article for relevance using Claude Opus, performs deep technical analysis on high-value content, and routes results to a structured Google Sheet.
 
 Built for security practitioners, threat intel analysts, and offensive security teams who need to stay current without drowning in feed volume.
 
